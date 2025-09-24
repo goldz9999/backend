@@ -1,0 +1,18 @@
+{
+  "category": "vocales",
+  "labels": [
+    "E",
+    "A",
+    "I",
+    "O",
+    "U"
+  ],
+  "num_samples": 148,
+  "training_date": "2025-09-24T00:26:21.626318",
+  "final_metrics": {
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1_score": 1.0
+  }
+}

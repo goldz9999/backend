@@ -1,13 +1,13 @@
 from fastapi import APIRouter, BackgroundTasks
 from fastapi.responses import JSONResponse
 import tensorflow as tf
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Dropout, BatchNormalization
-from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
-from sklearn.model_selection import train_test_split, StratifiedKFold
+from keras.models import Sequential
+from keras.layers import Dense, Dropout, BatchNormalization
+from keras.optimizers import Adam
+from keras.callbacks import EarlyStopping, ReduceLROnPlateau
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 import numpy as np
 import json
 import os
@@ -28,20 +28,22 @@ logger = logging.getLogger(__name__)
 
 class TrainingStatus:
     def __init__(self):
-        self.status = "idle"  # idle, training, completed, error
+        self.status = "idle"
         self.progress = 0
         self.message = ""
         self.start_time = None
         self.end_time = None
         self.metrics = {}
 
-# Estado global de entrenamiento
 training_status = TrainingStatus()
 
 def preprocess_data(X: np.ndarray, y: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """Preprocesa los datos para mejorar el entrenamiento"""
     
-    # Normalizar landmarks (ya están en rango 0-1 pero podemos estandarizar)
+    # Asegurar que la carpeta models existe
+    os.makedirs(MODELS_DIR, exist_ok=True)
+    
+    # Normalizar landmarks
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
     
@@ -56,12 +58,10 @@ def create_advanced_model(input_shape: int, num_classes: int) -> Sequential:
     """Crea un modelo más avanzado con mejores técnicas"""
     
     model = Sequential([
-        # Capa de entrada con normalización
         Dense(512, activation='relu', input_shape=(input_shape,)),
         BatchNormalization(),
         Dropout(0.3),
         
-        # Capas ocultas con skip connections simuladas
         Dense(256, activation='relu'),
         BatchNormalization(),
         Dropout(0.3),
@@ -74,22 +74,15 @@ def create_advanced_model(input_shape: int, num_classes: int) -> Sequential:
         BatchNormalization(),
         Dropout(0.2),
         
-        # Capa de salida
         Dense(num_classes, activation='softmax')
     ])
     
-    # Optimizador con learning rate adaptativo
-    optimizer = Adam(
-        learning_rate=0.001,
-        beta_1=0.9,
-        beta_2=0.999,
-        epsilon=1e-07
-    )
+    optimizer = Adam(learning_rate=0.001)
     
     model.compile(
         optimizer=optimizer,
         loss='sparse_categorical_crossentropy',
-        metrics=['accuracy', 'precision', 'recall']
+        metrics=['accuracy']
     )
     
     return model
@@ -112,7 +105,7 @@ def load_and_process_category_data(category: str) -> Tuple[np.ndarray, np.ndarra
     # Validar muestras mínimas
     insufficient_labels = []
     for label, samples in data.items():
-        if len(samples) < 20:  # Mínimo reducido a 20 para pruebas
+        if len(samples) < 20:
             insufficient_labels.append(f"{label}: {len(samples)}/20")
     
     if insufficient_labels:
@@ -143,14 +136,12 @@ def load_and_process_category_data(category: str) -> Tuple[np.ndarray, np.ndarra
 async def train_advanced_model(category: str, background_tasks: BackgroundTasks):
     """Entrena un modelo avanzado con validación cruzada"""
     
-    # Verificar si ya hay un entrenamiento en progreso
     if training_status.status == "training":
         return JSONResponse(
             status_code=409,
             content={"error": "Ya hay un entrenamiento en progreso"}
         )
     
-    # Iniciar entrenamiento en background
     background_tasks.add_task(train_model_background, category)
     
     return JSONResponse({
@@ -169,6 +160,11 @@ def train_model_background(category: str):
         training_status.progress = 0
         training_status.message = "Iniciando entrenamiento..."
         training_status.start_time = datetime.now()
+        
+        # Asegurar que las carpetas existen AL INICIO
+        os.makedirs(MODELS_DIR, exist_ok=True)
+        os.makedirs(LOGS_DIR, exist_ok=True)
+        os.makedirs(DATA_DIR, exist_ok=True)
         
         # Cargar datos
         training_status.message = "Cargando datos..."
@@ -199,21 +195,10 @@ def train_model_background(category: str):
         training_status.progress = 40
         model = create_advanced_model(X_processed.shape[1], len(labels))
         
-        # Callbacks avanzados
+        # Callbacks
         callbacks = [
-            EarlyStopping(
-                monitor='val_accuracy',
-                patience=15,
-                restore_best_weights=True,
-                verbose=1
-            ),
-            ReduceLROnPlateau(
-                monitor='val_loss',
-                factor=0.5,
-                patience=8,
-                min_lr=0.00001,
-                verbose=1
-            )
+            EarlyStopping(monitor='val_accuracy', patience=15, restore_best_weights=True),
+            ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=8, min_lr=0.00001)
         ]
         
         # Entrenamiento
@@ -224,7 +209,7 @@ def train_model_background(category: str):
             X_train, y_train,
             validation_data=(X_val, y_val),
             epochs=100,
-            batch_size=16,  # Batch más pequeño para mejor convergencia
+            batch_size=16,
             callbacks=callbacks,
             verbose=1
         )
@@ -236,9 +221,6 @@ def train_model_background(category: str):
         val_predictions = model.predict(X_val)
         val_pred_classes = np.argmax(val_predictions, axis=1)
         
-        # Métricas detalladas
-        from sklearn.metrics import accuracy_score, precision_recall_fscore_support
-        
         accuracy = accuracy_score(y_val, val_pred_classes)
         precision, recall, f1, _ = precision_recall_fscore_support(
             y_val, val_pred_classes, average='weighted'
@@ -247,9 +229,6 @@ def train_model_background(category: str):
         # Guardar todo
         training_status.message = "Guardando modelo..."
         training_status.progress = 90
-        
-        os.makedirs(MODELS_DIR, exist_ok=True)
-        os.makedirs(LOGS_DIR, exist_ok=True)
         
         # Guardar modelo
         model_path = os.path.join(MODELS_DIR, f"{category}_model.h5")
@@ -260,24 +239,17 @@ def train_model_background(category: str):
         with open(encoder_path, "wb") as f:
             pickle.dump(label_encoder, f)
         
-        # Guardar información completa
+        # Guardar información
         model_info = {
             "category": category,
             "labels": labels,
             "num_samples": len(X),
-            "num_classes": len(labels),
-            "input_shape": X_processed.shape[1],
             "training_date": datetime.now().isoformat(),
             "final_metrics": {
                 "accuracy": float(accuracy),
                 "precision": float(precision),
                 "recall": float(recall),
                 "f1_score": float(f1),
-                "val_loss": float(min(history.history['val_loss']))
-            },
-            "training_history": {
-                "epochs": len(history.history['loss']),
-                "best_epoch": int(np.argmin(history.history['val_loss'])) + 1
             }
         }
         
