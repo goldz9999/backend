@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import json
 import os
 from datetime import datetime
@@ -179,3 +179,44 @@ def get_dataset_summary(category: str):
             "completion_percentage": min(100, completion)
         }
     })
+
+@router.delete("/clear/{category}")
+def clear_category_data(category: str, label: str = None):
+    """Limpia datos de una categoría o label específico"""
+    
+    file_path = os.path.join(DATA_DIR, f"Category.{category}.json")
+    
+    if not os.path.exists(file_path):
+        return JSONResponse({
+            "message": f"No hay datos para la categoría '{category}'"
+        })
+    
+    if label:
+        # Limpiar solo un label específico
+        with open(file_path, "r", encoding="utf-8") as f:
+            try:
+                data = json.load(f)
+            except json.JSONDecodeError:
+                data = {}
+        
+        if label in data:
+            del data[label]
+            
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=4, ensure_ascii=False)
+            
+            return JSONResponse({
+                "message": f"Datos del label '{label}' eliminados de la categoría '{category}'"
+            })
+        else:
+            return JSONResponse({
+                "message": f"El label '{label}' no existe en la categoría '{category}'"
+            })
+    else:
+        # Limpiar toda la categoría
+        os.remove(file_path)
+        return JSONResponse({
+            "message": f"Todos los datos de la categoría '{category}' han sido eliminados"
+        })
+
+

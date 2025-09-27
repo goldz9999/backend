@@ -1,10 +1,13 @@
 {
   "category": "vocales",
+  "model_name": "Vocal A",
   "labels": [
-    "A"
+    "A",
+    "E"
   ],
-  "num_samples": 30,
-  "training_date": "2025-09-26T21:18:25.899234",
+  "num_samples": 60,
+  "epochs": 100,
+  "training_date": "2025-09-26T21:28:08.045184",
   "final_metrics": {
     "accuracy": 1.0,
     "precision": 1.0,
