@@ -208,10 +208,7 @@ def train_model_background(category: str, model_name: str, epochs: int, batch_si
         training_status.progress = 40
         model = create_advanced_model(X_processed.shape[1], len(labels), learning_rate)
 
-        callbacks = [
-            EarlyStopping(monitor='val_accuracy', patience=15, restore_best_weights=True),
-            ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=8, min_lr=0.00001)
-        ]
+        callbacks = []
 
         # Entrenamiento
         training_status.message = "Entrenando modelo..."

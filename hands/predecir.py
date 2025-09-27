@@ -27,6 +27,10 @@ class BatchPredictionRequest(BaseModel):
     landmarks_batch: List[List[float]]
     model_name: Optional[str] = None
     confidence_threshold: float = 0.7
+class PracticeRequest(BaseModel):
+    landmarks: List[float]
+    confidence_threshold: float = 0.7
+    model_name: Optional[str] = None
 
 def get_model_cache_key(category: str, model_name: str = "default") -> str:
     """Genera clave única para el cache del modelo"""
@@ -509,68 +513,89 @@ def clear_category_cache(category: str):
         "cleared_models": keys_to_remove
     })
 @router.post("/{category}/practice/check")
-def check_practice(category: str, landmarks: List[float] = Query(...), confidence_threshold: float = 0.7):
+def check_practice(category: str, request: PracticeRequest):
     """
-    Endpoint de práctica: predice la clase usando el modelo entrenado más reciente
+    Endpoint de práctica: predice la clase usando el modelo entrenado
     """
-    if len(landmarks) != 126:
-        return JSONResponse({
-            "error": f"Se esperan 126 landmarks, recibidos: {len(landmarks)}",
-            "success": False
-        })
+    if len(request.landmarks) != 126:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": f"Se esperan 126 landmarks, recibidos: {len(request.landmarks)}",
+                "success": False
+            }
+        )
     
-    # Seleccionar modelo por defecto (más reciente)
+    # Seleccionar modelo por defecto o específico
     try:
-        model_name = get_default_model_for_category(category)
+        model_name = request.model_name or get_default_model_for_category(category)
     except FileNotFoundError:
-        return JSONResponse({
-            "error": f"No hay modelos entrenados para la categoría '{category}'",
-            "success": False
-        })
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": f"No hay modelos entrenados para la categoría '{category}'",
+                "success": False
+            }
+        )
     
     # Cargar modelo
     try:
         components = load_model_components(category, model_name)
     except Exception as e:
-        return JSONResponse({
-            "error": f"No se pudo cargar el modelo: {str(e)}",
-            "success": False
-        })
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": f"No se pudo cargar el modelo '{model_name}': {str(e)}",
+                "success": False
+            }
+        )
     
     model = components["model"]
     encoder = components["encoder"]
     scaler = components["scaler"]
     
     # Preparar datos
-    landmarks_array = np.array([landmarks])
+    landmarks_array = np.array([request.landmarks])
     if scaler:
         landmarks_array = scaler.transform(landmarks_array)
     
     # Predicción
-    predictions = model.predict(landmarks_array, verbose=0)[0]
-    predicted_idx = int(np.argmax(predictions))
-    predicted_label = encoder.inverse_transform([predicted_idx])[0]
-    confidence = float(predictions[predicted_idx])
-    
-    high_confidence = confidence >= confidence_threshold
-    
-    # Ranking top 3
-    ranking = []
-    for i, prob in enumerate(predictions):
-        label = encoder.inverse_transform([i])[0]
-        ranking.append({
-            "label": label,
-            "confidence": float(prob),
-            "percentage": round(float(prob) * 100, 2)
+    try:
+        predictions = model.predict(landmarks_array, verbose=0)[0]
+        predicted_idx = int(np.argmax(predictions))
+        predicted_label = encoder.inverse_transform([predicted_idx])[0]
+        confidence = float(predictions[predicted_idx])
+        percentage = round(confidence * 100, 2)
+        
+        high_confidence = confidence >= request.confidence_threshold
+        
+        # Ranking top 3
+        ranking = []
+        for i, prob in enumerate(predictions):
+            label = encoder.inverse_transform([i])[0]
+            ranking.append({
+                "label": label,
+                "confidence": float(prob),
+                "percentage": round(float(prob) * 100, 2)
+            })
+        ranking.sort(key=lambda x: x["confidence"], reverse=True)
+        
+        return JSONResponse({
+            "success": True,
+            "category": category,
+            "model_name": model_name,
+            "prediction": predicted_label,
+            "confidence": confidence,
+            "percentage": percentage,
+            "high_confidence": high_confidence,
+            "top_3": ranking[:3]
         })
-    ranking.sort(key=lambda x: x["confidence"], reverse=True)
-    
-    return JSONResponse({
-        "success": True,
-        "category": category,
-        "model_name": model_name,
-        "prediction": predicted_label,
-        "confidence": confidence,
-        "high_confidence": high_confidence,
-        "top_3": ranking[:3]
-    })
+        
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": f"Error durante la predicción: {str(e)}",
+                "success": False
+            }
+        )

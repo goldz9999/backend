@@ -1,0 +1,32 @@
+{
+  "category": "vocales",
+  "model_name": "practica 2",
+  "labels": [
+    "A",
+    "E",
+    "I"
+  ],
+  "num_samples": 90,
+  "epochs": 150,
+  "batch_size": 16,
+  "learning_rate": 0.001,
+  "training_date": "2025-09-27T14:12:39.946739",
+  "final_metrics": {
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1_score": 1.0,
+    "val_loss": 4.097367491340265e-05
+  },
+  "training_history": {
+    "total_epochs": 150,
+    "best_epoch": 150,
+    "final_train_accuracy": 1.0,
+    "final_val_accuracy": 1.0
+  },
+  "model_files": {
+    "model_path": "models\\vocales_practica 2_model.h5",
+    "encoder_path": "models\\vocales_practica 2_encoder.pkl",
+    "scaler_path": "models\\vocales_practica 2_scaler.pkl"
+  }
+}
