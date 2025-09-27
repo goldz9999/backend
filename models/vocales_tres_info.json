@@ -1,0 +1,32 @@
+{
+  "category": "vocales",
+  "model_name": "tres",
+  "labels": [
+    "A",
+    "E",
+    "I"
+  ],
+  "num_samples": 60,
+  "epochs": 75,
+  "batch_size": 16,
+  "learning_rate": 0.001,
+  "training_date": "2025-09-27T16:21:39.304224",
+  "final_metrics": {
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1_score": 1.0,
+    "val_loss": 0.002041245810687542
+  },
+  "training_history": {
+    "total_epochs": 75,
+    "best_epoch": 75,
+    "final_train_accuracy": 1.0,
+    "final_val_accuracy": 1.0
+  },
+  "model_files": {
+    "model_path": "models\\vocales_tres_model.h5",
+    "encoder_path": "models\\vocales_tres_encoder.pkl",
+    "scaler_path": "models\\vocales_tres_scaler.pkl"
+  }
+}
