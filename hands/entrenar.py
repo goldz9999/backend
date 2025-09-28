@@ -1,6 +1,7 @@
 # hands/entrenar.py - Versión actualizada
 from fastapi import APIRouter, BackgroundTasks, Form, UploadFile, File
 from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import tensorflow as tf
 from keras.models import Sequential
@@ -12,6 +13,7 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 import numpy as np
 import json
+import glob
 import os
 import pickle
 from fastapi import UploadFile, File
@@ -922,3 +924,177 @@ async def get_model(filename: str):
             content={"error": "Archivo no encontrado"}
         )
     return FileResponse(file_path)
+
+# Agregar estos endpoints al archivo hands/entrenar.py
+
+@router.get("/models/available")
+def list_all_available_models():
+    """Lista todos los modelos disponibles para descarga pública"""
+    try:
+        if not os.path.exists(MODELS_DIR):
+            return JSONResponse({
+                "models": [],
+                "total": 0,
+                "message": "No hay modelos disponibles"
+            })
+
+        available_models = []
+        
+        # Buscar modelos con archivos completos
+        for filename in os.listdir(MODELS_DIR):
+            if filename.endswith("_info.json"):
+                try:
+                    with open(os.path.join(MODELS_DIR, filename), "r", encoding="utf-8") as f:
+                        model_info = json.load(f)
+                    
+                    category = model_info.get("category", "unknown")
+                    model_name = model_info.get("model_name", "unknown")
+                    
+                    # Verificar que existan todos los archivos necesarios
+                    model_path = os.path.join(MODELS_DIR, f"{category}_{model_name}_model.h5")
+                    encoder_path = os.path.join(MODELS_DIR, f"{category}_{model_name}_encoder.pkl")
+                    
+                    # ✅ NUEVOS ARCHIVOS PARA TENSORFLOW.JS
+                    model_json_path = os.path.join(MODELS_DIR, "frontend_uploads", f"{category}_{model_name}_model.json")
+                    weights_bin_path = os.path.join(MODELS_DIR, "frontend_uploads", f"{category}_{model_name}_weights.bin")
+                    
+                    if (os.path.exists(model_path) and os.path.exists(encoder_path) and 
+                        os.path.exists(model_json_path) and os.path.exists(weights_bin_path)):
+                        
+                        # Calcular tamaños
+                        model_size = os.path.getsize(model_json_path)
+                        weights_size = os.path.getsize(weights_bin_path)
+                        
+                        model_data = {
+                            "category": category,
+                            "model_name": model_name,
+                            "labels": model_info.get("labels", []),
+                            "accuracy": model_info.get("final_metrics", {}).get("accuracy", 0) * 100,
+                            "training_date": model_info.get("training_date", ""),
+                            "samples_used": model_info.get("num_samples", 0),
+                            "download_info": {
+                                "model_url": f"/train/download/model/{category}/{model_name}/model.json",
+                                "weights_url": f"/train/download/model/{category}/{model_name}/weights.bin",
+                                "model_size_bytes": model_size,
+                                "weights_size_bytes": weights_size,
+                                "total_size_mb": round((model_size + weights_size) / (1024*1024), 2)
+                            }
+                        }
+                        
+                        available_models.append(model_data)
+                        
+                except Exception as e:
+                    logger.error(f"Error procesando modelo {filename}: {e}")
+        
+        # Ordenar por fecha de entrenamiento
+        available_models.sort(key=lambda x: x.get("training_date", ""), reverse=True)
+        
+        return JSONResponse({
+            "models": available_models,
+            "total": len(available_models),
+            "message": f"Se encontraron {len(available_models)} modelos disponibles para descarga"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error listando modelos disponibles: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Error interno: {str(e)}"}
+        )
+
+@router.get("/download/model/{category}/{model_name}/model.json")
+async def download_model_json(category: str, model_name: str):
+    """Descarga el archivo model.json de un modelo específico"""
+    try:
+        model_json_path = os.path.join(MODELS_DIR, "frontend_uploads", f"{category}_{model_name}_model.json")
+        
+        if not os.path.exists(model_json_path):
+            return JSONResponse(
+                status_code=404,
+                content={"error": f"Archivo model.json no encontrado para {category}/{model_name}"}
+            )
+        
+        return FileResponse(
+            path=model_json_path,
+            filename=f"{category}_{model_name}_model.json",
+            media_type="application/json"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error descargando model.json: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Error descargando archivo: {str(e)}"}
+        )
+
+@router.get("/download/model/{category}/{model_name}/weights.bin")
+async def download_model_weights(category: str, model_name: str):
+    """Descarga el archivo weights.bin de un modelo específico"""
+    try:
+        weights_bin_path = os.path.join(MODELS_DIR, "frontend_uploads", f"{category}_{model_name}_weights.bin")
+        
+        if not os.path.exists(weights_bin_path):
+            return JSONResponse(
+                status_code=404,
+                content={"error": f"Archivo weights.bin no encontrado para {category}/{model_name}"}
+            )
+        
+        return FileResponse(
+            path=weights_bin_path,
+            filename=f"{category}_{model_name}_weights.bin",
+            media_type="application/octet-stream"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error descargando weights.bin: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Error descargando archivo: {str(e)}"}
+        )
+
+@router.get("/download/model/{category}/{model_name}/info")
+async def download_model_info(category: str, model_name: str):
+    """Obtiene información completa de un modelo para descarga"""
+    try:
+        info_path = os.path.join(MODELS_DIR, f"{category}_{model_name}_info.json")
+        
+        if not os.path.exists(info_path):
+            return JSONResponse(
+                status_code=404,
+                content={"error": f"Información del modelo {category}/{model_name} no encontrada"}
+            )
+        
+        with open(info_path, "r", encoding="utf-8") as f:
+            model_info = json.load(f)
+        
+        # Verificar archivos necesarios
+        model_json_path = os.path.join(MODELS_DIR, "frontend_uploads", f"{category}_{model_name}_model.json")
+        weights_bin_path = os.path.join(MODELS_DIR, "frontend_uploads", f"{category}_{model_name}_weights.bin")
+        
+        download_ready = os.path.exists(model_json_path) and os.path.exists(weights_bin_path)
+        
+        # Información para descarga
+        download_info = {
+            "ready_for_download": download_ready,
+            "model_url": f"/train/download/model/{category}/{model_name}/model.json" if download_ready else None,
+            "weights_url": f"/train/download/model/{category}/{model_name}/weights.bin" if download_ready else None,
+            "model_size_bytes": os.path.getsize(model_json_path) if download_ready else 0,
+            "weights_size_bytes": os.path.getsize(weights_bin_path) if download_ready else 0
+        }
+        
+        if download_ready:
+            download_info["total_size_mb"] = round(
+                (download_info["model_size_bytes"] + download_info["weights_size_bytes"]) / (1024*1024), 2
+            )
+        
+        return JSONResponse({
+            **model_info,
+            "download_info": download_info
+        })
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo información del modelo: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Error obteniendo información: {str(e)}"}
+        )
