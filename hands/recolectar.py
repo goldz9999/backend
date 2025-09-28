@@ -218,5 +218,118 @@ def clear_category_data(category: str, label: str = None):
         return JSONResponse({
             "message": f"Todos los datos de la categoría '{category}' han sido eliminados"
         })
+# Agregar este endpoint al archivo hands/entrenar.py
 
-
+@router.get("/{category}/download-training-data")
+def download_training_data(category: str):
+    """Descarga todos los datos de una categoría para entrenamiento"""
+    try:
+        # Cargar datos usando la función existente (del archivo recolectar.py o entrenar.py)
+        file_path = os.path.join(DATA_DIR, f"Category.{category}.json")
+        
+        if not os.path.exists(file_path):
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "error": f"No hay datos disponibles para la categoría '{category}'",
+                    "category": category
+                }
+            )
+        
+        # Leer archivo de datos
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        if not data:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "error": f"El archivo de la categoría '{category}' está vacío",
+                    "category": category
+                }
+            )
+        
+        # Procesar datos para entrenamiento
+        X, y = [], []
+        labels = list(data.keys())
+        
+        # Crear mapeo de etiquetas a índices
+        label_to_index = {label: idx for idx, label in enumerate(labels)}
+        
+        # Estadísticas por etiqueta
+        label_stats = {}
+        
+        for label, samples in data.items():
+            label_index = label_to_index[label]
+            sample_count = 0
+            
+            for sample in samples:
+                # Extraer landmarks (compatible con estructura existente)
+                if isinstance(sample, dict) and 'landmarks' in sample:
+                    landmarks = sample['landmarks']
+                else:
+                    landmarks = sample
+                
+                # Validar que tenga 126 landmarks
+                if isinstance(landmarks, list) and len(landmarks) == 126:
+                    X.append(landmarks)
+                    y.append(label_index)
+                    sample_count += 1
+            
+            label_stats[label] = sample_count
+        
+        if len(X) == 0:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": f"No hay muestras válidas (126 landmarks) en la categoría '{category}'",
+                    "category": category
+                }
+            )
+        
+        # Respuesta completa
+        response_data = {
+            "category": category,
+            "X": X,  # Lista de listas con landmarks
+            "y": y,  # Lista de índices de etiquetas
+            "labels": labels,  # Lista de nombres de etiquetas
+            "label_to_index": label_to_index,
+            "statistics": {
+                "total_samples": len(X),
+                "total_labels": len(labels),
+                "samples_per_label": label_stats,
+                "features_per_sample": 126
+            },
+            "ready_to_train": len(labels) > 1 and len(X) >= len(labels) * 10,  # Al menos 10 por etiqueta
+            "download_timestamp": datetime.now().isoformat()
+        }
+        
+        print(f"✅ Datos descargados para '{category}': {len(X)} muestras, {len(labels)} etiquetas")
+        
+        return JSONResponse(response_data)
+        
+    except FileNotFoundError:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": f"Categoría '{category}' no encontrada",
+                "category": category
+            }
+        )
+    except json.JSONDecodeError:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": f"Archivo de datos de '{category}' está corrupto",
+                "category": category
+            }
+        )
+    except Exception as e:
+        print(f"❌ Error descargando datos de '{category}': {e}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": f"Error interno descargando datos de '{category}'",
+                "details": str(e)
+            }
+        )

@@ -1,6 +1,6 @@
 # hands/entrenar.py - Versión actualizada
-from fastapi import APIRouter, BackgroundTasks
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, BackgroundTasks, Form
+from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel
 import tensorflow as tf
 from keras.models import Sequential
@@ -14,6 +14,8 @@ import numpy as np
 import json
 import os
 import pickle
+from fastapi import UploadFile, File
+import shutil
 from datetime import datetime
 from typing import List, Tuple, Dict, Optional
 import logging
@@ -645,3 +647,183 @@ async def get_frontend_package(category: str, model_name: str):
             status_code=500,
             content={"error": f"Error obteniendo paquete: {str(e)}"}
         )
+@router.get("/{category}/download-training-data")
+def download_training_data(category: str):
+    """Descarga todos los datos de una categoría para entrenamiento"""
+    try:
+        # Cargar datos usando la función existente (del archivo recolectar.py o entrenar.py)
+        file_path = os.path.join(DATA_DIR, f"Category.{category}.json")
+        
+        if not os.path.exists(file_path):
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "error": f"No hay datos disponibles para la categoría '{category}'",
+                    "category": category
+                }
+            )
+        
+        # Leer archivo de datos
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        if not data:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "error": f"El archivo de la categoría '{category}' está vacío",
+                    "category": category
+                }
+            )
+        
+        # Procesar datos para entrenamiento
+        X, y = [], []
+        labels = list(data.keys())
+        
+        # Crear mapeo de etiquetas a índices
+        label_to_index = {label: idx for idx, label in enumerate(labels)}
+        
+        # Estadísticas por etiqueta
+        label_stats = {}
+        
+        for label, samples in data.items():
+            label_index = label_to_index[label]
+            sample_count = 0
+            
+            for sample in samples:
+                # Extraer landmarks (compatible con estructura existente)
+                if isinstance(sample, dict) and 'landmarks' in sample:
+                    landmarks = sample['landmarks']
+                else:
+                    landmarks = sample
+                
+                # Validar que tenga 126 landmarks
+                if isinstance(landmarks, list) and len(landmarks) == 126:
+                    X.append(landmarks)
+                    y.append(label_index)
+                    sample_count += 1
+            
+            label_stats[label] = sample_count
+        
+        if len(X) == 0:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": f"No hay muestras válidas (126 landmarks) en la categoría '{category}'",
+                    "category": category
+                }
+            )
+        
+        # Respuesta completa
+        response_data = {
+            "category": category,
+            "X": X,  # Lista de listas con landmarks
+            "y": y,  # Lista de índices de etiquetas
+            "labels": labels,  # Lista de nombres de etiquetas
+            "label_to_index": label_to_index,
+            "statistics": {
+                "total_samples": len(X),
+                "total_labels": len(labels),
+                "samples_per_label": label_stats,
+                "features_per_sample": 126
+            },
+            "ready_to_train": len(labels) > 1 and len(X) >= len(labels) * 10,  # Al menos 10 por etiqueta
+            "download_timestamp": datetime.now().isoformat()
+        }
+        
+        print(f"✅ Datos descargados para '{category}': {len(X)} muestras, {len(labels)} etiquetas")
+        
+        return JSONResponse(response_data)
+        
+    except FileNotFoundError:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": f"Categoría '{category}' no encontrada",
+                "category": category
+            }
+        )
+    except json.JSONDecodeError:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": f"Archivo de datos de '{category}' está corrupto",
+                "category": category
+            }
+        )
+    except Exception as e:
+        print(f"❌ Error descargando datos de '{category}': {e}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": f"Error interno descargando datos de '{category}'",
+                "details": str(e)
+            }
+        )
+
+@router.post("/upload-model")
+async def upload_model(files: list[UploadFile] = File(...)):
+    """Recibe el modelo desde el frontend y lo guarda"""
+    MODEL_UPLOAD_DIR = "models/latest"
+    os.makedirs(MODEL_UPLOAD_DIR, exist_ok=True)
+    
+    saved_files = []
+    
+    try:
+        for file in files:
+            # Validar que sea un archivo permitido
+            allowed_extensions = ['.json', '.bin', '.weights']
+            file_extension = os.path.splitext(file.filename)[1].lower()
+            
+            if file_extension not in allowed_extensions:
+                continue
+                
+            file_path = os.path.join(MODEL_UPLOAD_DIR, file.filename)
+            
+            # Guardar archivo
+            with open(file_path, "wb") as f:
+                content = await file.read()
+                f.write(content)
+            
+            saved_files.append({
+                "filename": file.filename,
+                "size": len(content),
+                "saved_path": file_path
+            })
+        
+        # Crear archivo de información del modelo
+        model_info = {
+            "status": "success",
+            "upload_date": datetime.now().isoformat(),
+            "files_received": saved_files,
+            "total_files": len(saved_files),
+            "message": f"Modelo recibido con {len(saved_files)} archivos"
+        }
+        
+        # Guardar información
+        info_path = os.path.join(MODEL_UPLOAD_DIR, "upload_info.json")
+        with open(info_path, "w", encoding="utf-8") as f:
+            json.dump(model_info, f, indent=2, ensure_ascii=False)
+        
+        return JSONResponse(content=model_info)
+        
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "error": str(e),
+                "message": "Error procesando archivos del modelo"
+            }
+        )
+
+@router.get("/model/latest/{filename}")
+async def get_model(filename: str):
+    """Sirve archivos del modelo para descarga"""
+    file_path = os.path.join("models/latest", filename)
+    if not os.path.exists(file_path):
+        return JSONResponse(
+            status_code=404,
+            content={"error": "Archivo no encontrado"}
+        )
+    return FileResponse(file_path)
