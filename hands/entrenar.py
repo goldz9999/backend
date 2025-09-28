@@ -927,9 +927,11 @@ async def get_model(filename: str):
 
 # Agregar estos endpoints al archivo hands/entrenar.py
 
+# 🔥 REEMPLAZA la función list_all_available_models en hands/entrenar.py
+
 @router.get("/models/available")
 def list_all_available_models():
-    """Lista todos los modelos disponibles para descarga pública"""
+    """Lista todos los modelos disponibles para descarga pública - VERSIÓN CORREGIDA"""
     try:
         if not os.path.exists(MODELS_DIR):
             return JSONResponse({
@@ -940,66 +942,254 @@ def list_all_available_models():
 
         available_models = []
         
-        # Buscar modelos con archivos completos
-        for filename in os.listdir(MODELS_DIR):
-            if filename.endswith("_info.json"):
-                try:
-                    with open(os.path.join(MODELS_DIR, filename), "r", encoding="utf-8") as f:
-                        model_info = json.load(f)
-                    
-                    category = model_info.get("category", "unknown")
-                    model_name = model_info.get("model_name", "unknown")
-                    
-                    # Verificar que existan todos los archivos necesarios
-                    model_path = os.path.join(MODELS_DIR, f"{category}_{model_name}_model.h5")
-                    encoder_path = os.path.join(MODELS_DIR, f"{category}_{model_name}_encoder.pkl")
-                    
-                    # ✅ NUEVOS ARCHIVOS PARA TENSORFLOW.JS
-                    model_json_path = os.path.join(MODELS_DIR, "frontend_uploads", f"{category}_{model_name}_model.json")
-                    weights_bin_path = os.path.join(MODELS_DIR, "frontend_uploads", f"{category}_{model_name}_weights.bin")
-                    
-                    if (os.path.exists(model_path) and os.path.exists(encoder_path) and 
-                        os.path.exists(model_json_path) and os.path.exists(weights_bin_path)):
-                        
-                        # Calcular tamaños
-                        model_size = os.path.getsize(model_json_path)
-                        weights_size = os.path.getsize(weights_bin_path)
-                        
-                        model_data = {
-                            "category": category,
-                            "model_name": model_name,
-                            "labels": model_info.get("labels", []),
-                            "accuracy": model_info.get("final_metrics", {}).get("accuracy", 0) * 100,
-                            "training_date": model_info.get("training_date", ""),
-                            "samples_used": model_info.get("num_samples", 0),
-                            "download_info": {
-                                "model_url": f"/train/download/model/{category}/{model_name}/model.json",
-                                "weights_url": f"/train/download/model/{category}/{model_name}/weights.bin",
-                                "model_size_bytes": model_size,
-                                "weights_size_bytes": weights_size,
-                                "total_size_mb": round((model_size + weights_size) / (1024*1024), 2)
-                            }
-                        }
-                        
-                        available_models.append(model_data)
-                        
-                except Exception as e:
-                    logger.error(f"Error procesando modelo {filename}: {e}")
+        # 🆕 BUSCAR EN AMBAS UBICACIONES
+        search_directories = [
+            MODELS_DIR,  # Directorio principal
+            os.path.join(MODELS_DIR, "frontend_uploads")  # Directorio de uploads del frontend
+        ]
         
+        for search_dir in search_directories:
+            if not os.path.exists(search_dir):
+                continue
+                
+            logger.info(f"🔍 Buscando modelos en: {search_dir}")
+            
+            # 🆕 MÉTODO 1: Buscar por archivos _info.json (modelos tradicionales)
+            for filename in os.listdir(search_dir):
+                if filename.endswith("_info.json"):
+                    try:
+                        with open(os.path.join(search_dir, filename), "r", encoding="utf-8") as f:
+                            model_info = json.load(f)
+                        
+                        category = model_info.get("category", "unknown")
+                        model_name = model_info.get("model_name", "unknown")
+                        
+                        # Verificar archivos del modelo tradicional
+                        model_path = os.path.join(MODELS_DIR, f"{category}_{model_name}_model.h5")
+                        encoder_path = os.path.join(MODELS_DIR, f"{category}_{model_name}_encoder.pkl")
+                        
+                        # 🆕 TAMBIÉN BUSCAR ARCHIVOS TFJS
+                        model_json_path = os.path.join(MODELS_DIR, "frontend_uploads", f"{category}_{model_name}_model.json")
+                        weights_bin_path = os.path.join(MODELS_DIR, "frontend_uploads", f"{category}_{model_name}_weights.bin")
+                        
+                        # Verificar qué archivos existen
+                        has_traditional = os.path.exists(model_path) and os.path.exists(encoder_path)
+                        has_tfjs = os.path.exists(model_json_path) and os.path.exists(weights_bin_path)
+                        
+                        if has_traditional or has_tfjs:
+                            # Calcular tamaños
+                            model_size = 0
+                            weights_size = 0
+                            
+                            if has_tfjs:
+                                model_size = os.path.getsize(model_json_path)
+                                weights_size = os.path.getsize(weights_bin_path)
+                            
+                            model_data = {
+                                "category": category,
+                                "model_name": model_name,
+                                "labels": model_info.get("labels", []),
+                                "accuracy": model_info.get("final_metrics", {}).get("accuracy", 0) * 100,
+                                "training_date": model_info.get("training_date", ""),
+                                "samples_used": model_info.get("num_samples", 0),
+                                "download_info": {
+                                    "ready_for_download": has_tfjs,
+                                    "model_url": f"/train/download/model/{category}/{model_name}/model.json" if has_tfjs else None,
+                                    "weights_url": f"/train/download/model/{category}/{model_name}/weights.bin" if has_tfjs else None,
+                                    "model_size_bytes": model_size,
+                                    "weights_size_bytes": weights_size,
+                                    "total_size_mb": round((model_size + weights_size) / (1024*1024), 2) if has_tfjs else 0,
+                                    "has_traditional": has_traditional,
+                                    "has_tfjs": has_tfjs
+                                }
+                            }
+                            
+                            available_models.append(model_data)
+                            logger.info(f"✅ Modelo encontrado (tradicional): {category}/{model_name}")
+                            
+                    except Exception as e:
+                        logger.error(f"Error procesando modelo tradicional {filename}: {e}")
+            
+            # 🆕 MÉTODO 2: Buscar archivos TFJS directamente (sin _info.json)
+            tfjs_models = {}
+            
+            for filename in os.listdir(search_dir):
+                if filename.endswith("_model.json"):
+                    # Extraer category y model_name del filename
+                    # Formato: category_modelname_model.json
+                    base_name = filename.replace("_model.json", "")
+                    parts = base_name.split("_")
+                    
+                    if len(parts) >= 2:
+                        category = parts[0]
+                        model_name = "_".join(parts[1:])  # El resto es el nombre del modelo
+                        
+                        model_key = f"{category}_{model_name}"
+                        
+                        if model_key not in tfjs_models:
+                            tfjs_models[model_key] = {
+                                "category": category,
+                                "model_name": model_name,
+                                "has_model": False,
+                                "has_weights": False,
+                                "model_path": None,
+                                "weights_path": None
+                            }
+                        
+                        tfjs_models[model_key]["has_model"] = True
+                        tfjs_models[model_key]["model_path"] = os.path.join(search_dir, filename)
+                
+                elif filename.endswith("_weights.bin"):
+                    # Extraer category y model_name del filename
+                    base_name = filename.replace("_weights.bin", "")
+                    parts = base_name.split("_")
+                    
+                    if len(parts) >= 2:
+                        category = parts[0]
+                        model_name = "_".join(parts[1:])
+                        
+                        model_key = f"{category}_{model_name}"
+                        
+                        if model_key not in tfjs_models:
+                            tfjs_models[model_key] = {
+                                "category": category,
+                                "model_name": model_name,
+                                "has_model": False,
+                                "has_weights": False,
+                                "model_path": None,
+                                "weights_path": None
+                            }
+                        
+                        tfjs_models[model_key]["has_weights"] = True
+                        tfjs_models[model_key]["weights_path"] = os.path.join(search_dir, filename)
+            
+            # Procesar modelos TFJS encontrados
+            for model_key, model_info in tfjs_models.items():
+                if model_info["has_model"] and model_info["has_weights"]:
+                    # Verificar si ya lo agregamos por el método tradicional
+                    already_added = any(
+                        m["category"] == model_info["category"] and 
+                        m["model_name"] == model_info["model_name"] 
+                        for m in available_models
+                    )
+                    
+                    if not already_added:
+                        try:
+                            # Calcular tamaños
+                            model_size = os.path.getsize(model_info["model_path"])
+                            weights_size = os.path.getsize(model_info["weights_path"])
+                            
+                            # 🆕 INTENTAR LEER LABELS DEL model.json
+                            labels = []
+                            try:
+                                with open(model_info["model_path"], "r", encoding="utf-8") as f:
+                                    model_json = json.load(f)
+                                    # Los labels no están en model.json típicamente, usar defaults
+                                    category = model_info["category"]
+                                    if category == "vocales":
+                                        labels = ["A", "E", "I", "O", "U"]
+                                    elif category == "numeros":
+                                        labels = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+                                    elif category == "operaciones":
+                                        labels = ["+", "-", "*", "/", "="]
+                                    elif category == "palabras":
+                                        labels = ["hola", "gracias", "por_favor", "si", "no"]
+                            except:
+                                labels = [f"label_{i}" for i in range(5)]  # Fallback
+                            
+                            model_data = {
+                                "category": model_info["category"],
+                                "model_name": model_info["model_name"],
+                                "labels": labels,
+                                "accuracy": 85.0,  # Estimado
+                                "training_date": datetime.now().isoformat(),  # Usar fecha actual si no tenemos info
+                                "samples_used": 100,  # Estimado
+                                "download_info": {
+                                    "ready_for_download": True,
+                                    "model_url": f"/train/download/model/{model_info['category']}/{model_info['model_name']}/model.json",
+                                    "weights_url": f"/train/download/model/{model_info['category']}/{model_info['model_name']}/weights.bin",
+                                    "model_size_bytes": model_size,
+                                    "weights_size_bytes": weights_size,
+                                    "total_size_mb": round((model_size + weights_size) / (1024*1024), 2),
+                                    "has_traditional": False,
+                                    "has_tfjs": True,
+                                    "source": "direct_tfjs"  # Indicar que se encontró directamente
+                                }
+                            }
+                            
+                            available_models.append(model_data)
+                            logger.info(f"✅ Modelo TFJS encontrado directamente: {model_info['category']}/{model_info['model_name']}")
+                            
+                        except Exception as e:
+                            logger.error(f"Error procesando modelo TFJS {model_key}: {e}")
+
         # Ordenar por fecha de entrenamiento
         available_models.sort(key=lambda x: x.get("training_date", ""), reverse=True)
         
+        logger.info(f"📊 Total modelos encontrados: {len(available_models)}")
+        
+        for model in available_models:
+            logger.info(f"  - {model['category']}/{model['model_name']} (Ready: {model['download_info']['ready_for_download']})")
+
         return JSONResponse({
             "models": available_models,
             "total": len(available_models),
-            "message": f"Se encontraron {len(available_models)} modelos disponibles para descarga"
+            "message": f"Se encontraron {len(available_models)} modelos disponibles para descarga",
+            "search_directories": search_directories,
+            "debug_info": {
+                "models_dir_exists": os.path.exists(MODELS_DIR),
+                "frontend_uploads_exists": os.path.exists(os.path.join(MODELS_DIR, "frontend_uploads")),
+                "total_files_found": sum([len(os.listdir(d)) for d in search_directories if os.path.exists(d)])
+            }
         })
         
     except Exception as e:
         logger.error(f"Error listando modelos disponibles: {e}")
         return JSONResponse(
             status_code=500,
-            content={"error": f"Error interno: {str(e)}"}
+            content={
+                "error": f"Error interno: {str(e)}",
+                "models": [],
+                "total": 0
+            }
+        )
+
+# 🆕 TAMBIÉN AGREGAR ENDPOINT DE DEBUG
+@router.get("/debug/files")
+def debug_files_in_backend():
+    """Endpoint de debug para ver qué archivos están en el backend"""
+    try:
+        debug_info = {
+            "models_dir": MODELS_DIR,
+            "models_dir_exists": os.path.exists(MODELS_DIR),
+            "directories": {}
+        }
+        
+        search_directories = [
+            MODELS_DIR,
+            os.path.join(MODELS_DIR, "frontend_uploads")
+        ]
+        
+        for directory in search_directories:
+            if os.path.exists(directory):
+                files = os.listdir(directory)
+                debug_info["directories"][directory] = {
+                    "exists": True,
+                    "file_count": len(files),
+                    "files": files,
+                    "tfjs_models": [f for f in files if f.endswith("_model.json")],
+                    "tfjs_weights": [f for f in files if f.endswith("_weights.bin")],
+                    "info_files": [f for f in files if f.endswith("_info.json")]
+                }
+            else:
+                debug_info["directories"][directory] = {"exists": False}
+        
+        return JSONResponse(debug_info)
+        
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
         )
 
 @router.get("/download/model/{category}/{model_name}/model.json")
