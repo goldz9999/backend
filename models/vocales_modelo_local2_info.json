@@ -1,0 +1,32 @@
+{
+  "category": "vocales",
+  "model_name": "modelo_local2",
+  "labels": [
+    "A",
+    "E",
+    "I"
+  ],
+  "num_samples": 90,
+  "epochs": 100,
+  "batch_size": 16,
+  "learning_rate": 0.001,
+  "training_date": "2025-09-28T02:11:36.655119",
+  "final_metrics": {
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1_score": 1.0,
+    "val_loss": 0.00015710019215475768
+  },
+  "training_history": {
+    "total_epochs": 100,
+    "best_epoch": 87,
+    "final_train_accuracy": 1.0,
+    "final_val_accuracy": 1.0
+  },
+  "model_files": {
+    "model_path": "models\\vocales_modelo_local2_model.h5",
+    "encoder_path": "models\\vocales_modelo_local2_encoder.pkl",
+    "scaler_path": "models\\vocales_modelo_local2_scaler.pkl"
+  }
+}
