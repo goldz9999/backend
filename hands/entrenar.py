@@ -1,5 +1,5 @@
 # hands/entrenar.py - Versión actualizada
-from fastapi import APIRouter, BackgroundTasks, Form
+from fastapi import APIRouter, BackgroundTasks, Form, UploadFile, File
 from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel
 import tensorflow as tf
@@ -19,6 +19,7 @@ import shutil
 from datetime import datetime
 from typing import List, Tuple, Dict, Optional
 import logging
+import tempfile
 
 router = APIRouter()
 
@@ -762,58 +763,152 @@ def download_training_data(category: str):
         )
 
 @router.post("/upload-model")
-async def upload_model(files: list[UploadFile] = File(...)):
-    """Recibe el modelo desde el frontend y lo guarda"""
-    MODEL_UPLOAD_DIR = "models/latest"
-    os.makedirs(MODEL_UPLOAD_DIR, exist_ok=True)
-    
-    saved_files = []
-    
+async def upload_model_from_frontend(
+    # Archivos opcionales
+    model_file: Optional[UploadFile] = File(None),
+    weights_file: Optional[UploadFile] = File(None),
+    # Campos de formulario
+    category: Optional[str] = Form(None),
+    model_name: Optional[str] = Form(None),
+    upload_timestamp: Optional[str] = Form(None),
+    labels: Optional[str] = Form(None),
+    # Alternativa JSON
+    upload_type: Optional[str] = Form(None)
+):
+    """
+    Recibe modelo desde el frontend - Soporta dos métodos:
+    1. Archivos + FormData
+    2. Solo metadata (JSON)
+    """
     try:
-        for file in files:
-            # Validar que sea un archivo permitido
-            allowed_extensions = ['.json', '.bin', '.weights']
-            file_extension = os.path.splitext(file.filename)[1].lower()
-            
-            if file_extension not in allowed_extensions:
-                continue
-                
-            file_path = os.path.join(MODEL_UPLOAD_DIR, file.filename)
-            
-            # Guardar archivo
-            with open(file_path, "wb") as f:
-                content = await file.read()
-                f.write(content)
-            
-            saved_files.append({
-                "filename": file.filename,
-                "size": len(content),
-                "saved_path": file_path
-            })
+        logger.info(f"📥 Recibiendo modelo desde frontend...")
+        logger.info(f"   - category: {category}")
+        logger.info(f"   - model_name: {model_name}")
+        logger.info(f"   - upload_type: {upload_type}")
+        logger.info(f"   - model_file: {model_file.filename if model_file else 'None'}")
+        logger.info(f"   - weights_file: {weights_file.filename if weights_file else 'None'}")
         
-        # Crear archivo de información del modelo
-        model_info = {
+        # Crear directorio si no existe
+        frontend_upload_dir = os.path.join(MODELS_DIR, "frontend_uploads")
+        os.makedirs(frontend_upload_dir, exist_ok=True)
+        
+        result_info = {
             "status": "success",
-            "upload_date": datetime.now().isoformat(),
-            "files_received": saved_files,
-            "total_files": len(saved_files),
-            "message": f"Modelo recibido con {len(saved_files)} archivos"
+            "upload_timestamp": upload_timestamp or datetime.now().isoformat(),
+            "category": category,
+            "model_name": model_name,
+            "upload_type": upload_type or "files",
+            "files_received": []
         }
         
-        # Guardar información
-        info_path = os.path.join(MODEL_UPLOAD_DIR, "upload_info.json")
-        with open(info_path, "w", encoding="utf-8") as f:
-            json.dump(model_info, f, indent=2, ensure_ascii=False)
+        # MÉTODO 1: Archivos completos
+        if model_file and weights_file:
+            logger.info("📁 Procesando archivos del modelo...")
+            
+            # Guardar model.json
+            model_path = os.path.join(frontend_upload_dir, f"{category}_{model_name}_model.json")
+            with open(model_path, "wb") as f:
+                content = await model_file.read()
+                f.write(content)
+            result_info["files_received"].append({
+                "file": "model.json",
+                "size": len(content),
+                "path": model_path
+            })
+            
+            # Guardar weights.bin
+            weights_path = os.path.join(frontend_upload_dir, f"{category}_{model_name}_weights.bin")
+            with open(weights_path, "wb") as f:
+                content = await weights_file.read()
+                f.write(content)
+            result_info["files_received"].append({
+                "file": "weights.bin", 
+                "size": len(content),
+                "path": weights_path
+            })
+            
+            result_info["message"] = f"Modelo completo recibido: {len(result_info['files_received'])} archivos"
+            
+        # MÉTODO 2: Solo metadata
+        else:
+            logger.info("📋 Procesando solo metadata...")
+            
+            # Crear archivo de información
+            info_data = {
+                "category": category,
+                "model_name": model_name,
+                "source": "frontend_training",
+                "upload_timestamp": result_info["upload_timestamp"],
+                "type": "tensorflow_js_model",
+                "status": "uploaded_metadata_only"
+            }
+            
+            if labels:
+                try:
+                    info_data["labels"] = json.loads(labels)
+                except:
+                    info_data["labels"] = []
+            
+            info_path = os.path.join(frontend_upload_dir, f"{category}_{model_name}_info.json")
+            with open(info_path, "w", encoding="utf-8") as f:
+                json.dump(info_data, f, indent=2, ensure_ascii=False)
+            
+            result_info["message"] = "Metadata del modelo registrada exitosamente"
+            result_info["info_path"] = info_path
         
-        return JSONResponse(content=model_info)
+        logger.info(f"✅ Upload completado: {result_info['message']}")
+        return JSONResponse(content=result_info)
         
     except Exception as e:
+        logger.error(f"❌ Error en upload: {str(e)}")
         return JSONResponse(
             status_code=500,
             content={
                 "status": "error",
                 "error": str(e),
-                "message": "Error procesando archivos del modelo"
+                "message": "Error procesando upload del modelo"
+            }
+        )
+
+# También agregar un endpoint simple para debugging
+@router.post("/upload-model-simple")
+async def upload_model_simple(request: dict):
+    """Endpoint simplificado para recibir solo metadata"""
+    try:
+        logger.info(f"📥 Upload simple recibido: {request}")
+        
+        # Crear directorio
+        simple_upload_dir = os.path.join(MODELS_DIR, "simple_uploads")
+        os.makedirs(simple_upload_dir, exist_ok=True)
+        
+        # Guardar información
+        timestamp = datetime.now().isoformat()
+        filename = f"upload_{timestamp.replace(':', '-')}.json"
+        filepath = os.path.join(simple_upload_dir, filename)
+        
+        upload_data = {
+            **request,
+            "received_at": timestamp,
+            "status": "received"
+        }
+        
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(upload_data, f, indent=2, ensure_ascii=False)
+        
+        return JSONResponse({
+            "status": "success",
+            "message": "Upload simple procesado exitosamente",
+            "file": filename,
+            "data": upload_data
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Error en upload simple: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error", 
+                "error": str(e)
             }
         )
 
