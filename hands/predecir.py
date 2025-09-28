@@ -135,7 +135,7 @@ async def predict_landmarks(category: str, request: PredictionRequest):
     
     try:
         # Validar landmarks
-        if len(request.landmarks) != 126:
+        if len(request.landmarks) != 63:
             return JSONResponse(
                 status_code=400,
                 content={
@@ -258,10 +258,10 @@ async def predict_batch_landmarks(category: str, request: BatchPredictionRequest
         results = []
         
         for i, landmarks in enumerate(request.landmarks_batch):
-            if len(landmarks) != 126:
+            if len(landmarks) != 63:
                 results.append({
                     "index": i,
-                    "error": f"Landmarks inválidos: {len(landmarks)}/126"
+                    "error": f"Landmarks inválidos: {len(landmarks)}/63"
                 })
                 continue
             
