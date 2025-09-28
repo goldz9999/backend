@@ -52,6 +52,47 @@ class TrainingStatus:
 
 training_status = TrainingStatus()
 
+def load_model_components(category: str, model_name: str = "default"):
+    """Carga todos los componentes del modelo - MISMA FUNCIÓN QUE EN predecir.py"""
+    model_path = os.path.join(MODELS_DIR, f"{category}_{model_name}_model.h5")
+    encoder_path = os.path.join(MODELS_DIR, f"{category}_{model_name}_encoder.pkl")
+    scaler_path = os.path.join(MODELS_DIR, f"{category}_{model_name}_scaler.pkl")
+    info_path = os.path.join(MODELS_DIR, f"{category}_{model_name}_info.json")
+    
+    # Verificar archivos necesarios
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Modelo '{category}/{model_name}' no encontrado")
+    if not os.path.exists(encoder_path):
+        raise FileNotFoundError(f"Encoder del modelo '{category}/{model_name}' no encontrado")
+    
+    try:
+        # Cargar modelo
+        model = tf.keras.models.load_model(model_path)
+        
+        # Cargar encoder
+        with open(encoder_path, "rb") as f:
+            encoder = pickle.load(f)
+        
+        # Cargar scaler si existe
+        scaler = None
+        if os.path.exists(scaler_path):
+            with open(scaler_path, "rb") as f:
+                scaler = pickle.load(f)
+        
+        # Cargar información
+        with open(info_path, "r", encoding="utf-8") as f:
+            info = json.load(f)
+        
+        return {
+            "model": model,
+            "encoder": encoder,
+            "scaler": scaler,
+            "info": info
+        }
+        
+    except Exception as e:
+        raise Exception(f"Error cargando modelo '{category}/{model_name}': {str(e)}")
+
 def preprocess_data(X: np.ndarray, y: np.ndarray, category: str, model_name: str) -> Tuple[np.ndarray, np.ndarray]:
     """Preprocesa los datos para mejorar el entrenamiento"""
     os.makedirs(MODELS_DIR, exist_ok=True)
@@ -480,4 +521,127 @@ def get_model_info(category: str, model_name: str):
         return JSONResponse(
             status_code=500,
             content={"error": f"Error leyendo información del modelo: {str(e)}"}
+        )
+# entrenar.py - Modificar para enviar el modelo AL FRONTEND directamente
+@router.post("/{category}/advanced")
+async def train_advanced_model(category: str, request: TrainingRequest, background_tasks: BackgroundTasks):
+    """Entrena y envía el modelo automáticamente al frontend"""
+    if training_status.status == "training":
+        return JSONResponse(
+            status_code=409,
+            content={"error": "Ya hay un entrenamiento en progreso"}
+        )
+
+    # ✅ INMEDIATAMENTE preparar respuesta con info para el frontend
+    response_data = {
+        "message": f"Entrenamiento de '{request.model_name}' iniciado",
+        "model_name": request.model_name,
+        "category": category,
+        "epochs": request.epochs,
+        "status": "started",
+        "auto_save_to_frontend": True,  # ✅ Nueva bandera
+        "frontend_model_key": f"{category}_{request.model_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    }
+
+    background_tasks.add_task(
+        train_and_send_to_frontend,  # ✅ Función que envía al frontend
+        category, 
+        request.model_name, 
+        request.epochs,
+        request.batch_size,
+        request.learning_rate
+    )
+
+    return JSONResponse(response_data)
+
+def train_and_send_to_frontend(category: str, model_name: str, epochs: int, batch_size: int, learning_rate: float):
+    """Entrena el modelo y lo prepara para almacenamiento en frontend"""
+    global training_status
+    
+    try:
+        # ... (código de entrenamiento existente) ...
+        
+        # ✅ DESPUÉS del entrenamiento exitoso, preparar paquete para frontend
+        training_status.message = "Preparando modelo para almacenamiento en frontend..."
+        
+        # Cargar el modelo recién entrenado
+        components = load_model_components(category, model_name)
+        model = components["model"]
+        encoder = components["encoder"] 
+        scaler = components["scaler"]
+        info = components["info"]
+        
+        # ✅ Crear paquete COMPACTO para el frontend
+        model_package = {
+            "metadata": {
+                "category": category,
+                "model_name": model_name,
+                "labels": info.get("labels", []),
+                "accuracy": info.get("final_metrics", {}).get("accuracy", 0),
+                "training_date": datetime.now().isoformat(),
+                "samples_used": info.get("num_samples", 0),
+                "version": "1.0"
+            },
+            "model_config": model.get_config(),
+            # ✅ Información mínima para reconstrucción en frontend
+            "model_info": {
+                "input_shape": model.input_shape,
+                "output_shape": model.output_shape,
+                "layers_count": len(model.layers),
+                "total_params": model.count_params()
+            },
+            "preprocessing": {
+                "encoder_classes": encoder.classes_.tolist(),
+                "scaler_params": {
+                    "mean": scaler.mean_.tolist() if scaler else None,
+                    "scale": scaler.scale_.tolist() if scaler else None
+                } if scaler else None
+            }
+        }
+        
+        # ✅ Guardar paquete en archivo accesible al frontend
+        frontend_package_path = os.path.join(MODELS_DIR, f"{category}_{model_name}_FRONTEND.json")
+        with open(frontend_package_path, "w", encoding="utf-8") as f:
+            json.dump(model_package, f, indent=2, ensure_ascii=False)
+        
+        training_status.message = f"✅ Modelo '{model_name}' guardado para frontend"
+        training_status.metrics = {
+            "frontend_package_created": True,
+            "package_path": frontend_package_path,
+            "ready_for_practice": True
+        }
+        
+        print(f"🎯 Modelo {model_name} listo para práctica inmediata en frontend")
+        
+    except Exception as e:
+        training_status.status = "error"
+        training_status.message = f"Error: {str(e)}"
+        logger.error(f"Error en entrenamiento: {e}")
+
+# ✅ Endpoint para obtener el modelo listo para frontend
+@router.get("/{category}/{model_name}/frontend-package")
+async def get_frontend_package(category: str, model_name: str):
+    """Obtiene el paquete del modelo listo para el frontend"""
+    try:
+        package_path = os.path.join(MODELS_DIR, f"{category}_{model_name}_FRONTEND.json")
+        
+        if not os.path.exists(package_path):
+            return JSONResponse(
+                status_code=404,
+                content={"error": "Paquete para frontend no encontrado"}
+            )
+        
+        with open(package_path, "r", encoding="utf-8") as f:
+            package_data = json.load(f)
+        
+        return JSONResponse({
+            "success": True,
+            "package": package_data,
+            "download_url": f"/train/{category}/{model_name}/frontend-package"
+        })
+        
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Error obteniendo paquete: {str(e)}"}
         )
