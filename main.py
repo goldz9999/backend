@@ -17,6 +17,7 @@ app = FastAPI(
 
 # Configurar CORS (para uso con frontend)
 origins = [
+    "https://proyecto-hands-git-adrian11-goldz999s-projects.vercel.app",
     "https://proyecto-hands.vercel.app",  # frontend en producción
     "http://localhost:3000",              # pruebas locales
 ]
