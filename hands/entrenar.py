@@ -1400,13 +1400,6 @@ async def upload_tensorflow_js_model_FIXED(
         # Backend debe guardar con el mismo nombre
         expected_weights_name = f"{sanitized_model_name}_weights.bin"
         
-        # ✅ CORREGIR weightsManifest si es necesario
-        if model_json_data["weightsManifest"][0]["paths"][0] != expected_weights_name:
-            logger.info(f"🔧 Corrigiendo weightsManifest path:")
-            logger.info(f"  - Original: {model_json_data['weightsManifest'][0]['paths'][0]}")
-            logger.info(f"  - Corregido: {expected_weights_name}")
-            model_json_data["weightsManifest"][0]["paths"] = [expected_weights_name]
-        
         # ✅ GUARDAR ARCHIVOS CON NOMBRES CONSISTENTES
         model_json_path = os.path.join(frontend_upload_dir, f"{sanitized_model_name}_model.json")
         weights_path = os.path.join(frontend_upload_dir, expected_weights_name)
