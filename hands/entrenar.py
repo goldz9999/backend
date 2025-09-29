@@ -1020,7 +1020,7 @@ def list_all_available_models_FIXED():
                             model_info = {
                                 "category": category,
                                 "model_name": base_name,
-                                "labels": self._get_default_labels(category),
+                                "labels": _get_default_labels(category),
                                 "training_date": datetime.now().isoformat(),
                                 "accuracy": 85.0,
                                 "samples_used": 150
@@ -1197,21 +1197,23 @@ def debug_files_in_backend():
         )
 
 @router.get("/download/model/{category}/{model_name}/model.json")
-async def download_model_json_FIXED(category: str, model_name: str):
-    """Descarga model.json con nombres sanitizados"""
+async def download_model_json_FINAL(category: str, model_name: str):
+    """Descarga model.json - VERSIÓN FINAL CORREGIDA"""
     try:
         # Buscar archivo con nombre sanitizado
         sanitized_name = model_name.replace(' ', '_').replace('-', '_').lower()
+        
+        # 🔥 BUSCAR EN FRONTEND_UPLOADS
         model_json_path = os.path.join(MODELS_DIR, "frontend_uploads", f"{sanitized_name}_model.json")
         
         if not os.path.exists(model_json_path):
             logger.error(f"❌ model.json no encontrado: {model_json_path}")
             
-            # Listar archivos disponibles para debug
+            # Debug: listar archivos disponibles
             upload_dir = os.path.join(MODELS_DIR, "frontend_uploads")
             if os.path.exists(upload_dir):
                 available_files = [f for f in os.listdir(upload_dir) if f.endswith('.json')]
-                logger.error(f"📁 Archivos disponibles: {available_files}")
+                logger.error(f"📁 Archivos .json disponibles: {available_files}")
             
             return JSONResponse(
                 status_code=404,
@@ -1237,17 +1239,19 @@ async def download_model_json_FIXED(category: str, model_name: str):
         )
 
 @router.get("/download/model/{category}/{model_name}/weights.bin")
-async def download_model_weights_FIXED(category: str, model_name: str):
-    """Descarga weights.bin con nombres sanitizados"""
+async def download_model_weights_FINAL(category: str, model_name: str):
+    """Descarga weights.bin - VERSIÓN FINAL CORREGIDA"""
     try:
         # Buscar archivo con nombre sanitizado
         sanitized_name = model_name.replace(' ', '_').replace('-', '_').lower()
+        
+        # 🔥 BUSCAR CON NOMBRE COMPLETO (como se guardó)
         weights_bin_path = os.path.join(MODELS_DIR, "frontend_uploads", f"{sanitized_name}_weights.bin")
         
         if not os.path.exists(weights_bin_path):
             logger.error(f"❌ weights.bin no encontrado: {weights_bin_path}")
             
-            # Listar archivos disponibles para debug
+            # Debug: listar archivos disponibles
             upload_dir = os.path.join(MODELS_DIR, "frontend_uploads")
             if os.path.exists(upload_dir):
                 available_files = [f for f in os.listdir(upload_dir) if f.endswith('.bin')]
@@ -1490,44 +1494,4 @@ async def upload_tensorflow_js_model_FIXED(
         return JSONResponse(
             status_code=500,
             content={"error": f"Error interno: {str(e)}"}
-        )
-
-@router.get("/download/model/{category}/{model_name}/model.json")
-async def download_model_json_FIXED(category: str, model_name: str):
-    """Descarga model.json con nombres sanitizados"""
-    try:
-        # Buscar archivo con nombre sanitizado
-        sanitized_name = model_name.replace(' ', '_').replace('-', '_').lower()
-        model_json_path = os.path.join(MODELS_DIR, "frontend_uploads", f"{sanitized_name}_model.json")
-        
-        if not os.path.exists(model_json_path):
-            logger.error(f"❌ model.json no encontrado: {model_json_path}")
-            
-            # Listar archivos disponibles para debug
-            upload_dir = os.path.join(MODELS_DIR, "frontend_uploads")
-            if os.path.exists(upload_dir):
-                available_files = [f for f in os.listdir(upload_dir) if f.endswith('.json')]
-                logger.error(f"📁 Archivos disponibles: {available_files}")
-            
-            return JSONResponse(
-                status_code=404,
-                content={
-                    "error": f"model.json no encontrado para {category}/{model_name}",
-                    "searched_path": model_json_path,
-                    "sanitized_name": sanitized_name
-                }
-            )
-        
-        logger.info(f"✅ Enviando model.json: {model_json_path}")
-        return FileResponse(
-            path=model_json_path,
-            filename=f"{sanitized_name}_model.json",
-            media_type="application/json"
-        )
-        
-    except Exception as e:
-        logger.error(f"❌ Error descargando model.json: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={"error": f"Error descargando archivo: {str(e)}"}
         )
