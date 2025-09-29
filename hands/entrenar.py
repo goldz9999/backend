@@ -1288,3 +1288,116 @@ async def download_model_info(category: str, model_name: str):
             status_code=500,
             content={"error": f"Error obteniendo información: {str(e)}"}
         )
+@router.post("/upload-tfjs-model")
+async def upload_tensorflow_js_model(
+    model_json: UploadFile = File(...),
+    weights_bin: UploadFile = File(...),
+    category: str = Form(...),
+    model_name: str = Form(...),
+    upload_timestamp: str = Form(...),
+    labels: str = Form(...)
+):
+    """
+    ✅ ENDPOINT CORREGIDO para recibir modelos TensorFlow.js
+    """
+    try:
+        logger.info(f"📥 Recibiendo modelo TensorFlow.js: {category}/{model_name}")
+        
+        # Crear directorio para frontend uploads
+        frontend_upload_dir = os.path.join(MODELS_DIR, "frontend_uploads")
+        os.makedirs(frontend_upload_dir, exist_ok=True)
+        
+        # Leer model.json
+        model_json_content = await model_json.read()
+        logger.info(f"📋 model.json recibido: {len(model_json_content)} bytes")
+        
+        # ✅ VALIDAR que el JSON tiene weightsManifest
+        try:
+            model_json_data = json.loads(model_json_content.decode('utf-8'))
+            
+            # Validar estructura
+            if not model_json_data.get("modelTopology"):
+                raise ValueError("Falta 'modelTopology' en model.json")
+            
+            if not model_json_data.get("weightsManifest"):
+                raise ValueError("Falta 'weightsManifest' en model.json")
+            
+            logger.info("✅ model.json validado correctamente")
+            logger.info(f"  - Tiene modelTopology: ✓")
+            logger.info(f"  - Tiene weightsManifest: ✓")
+            logger.info(f"  - Paths: {model_json_data['weightsManifest'][0]['paths']}")
+            
+        except json.JSONDecodeError as e:
+            raise ValueError(f"model.json no es JSON válido: {str(e)}")
+        
+        # Leer weights.bin
+        weights_content = await weights_bin.read()
+        logger.info(f"📦 weights.bin recibido: {len(weights_content)} bytes")
+        
+        # Parsear labels
+        try:
+            labels_list = json.loads(labels)
+        except:
+            labels_list = []
+        
+        # ✅ GUARDAR ARCHIVOS
+        base_name = f"{category}_{model_name}"
+        
+        # Guardar model.json
+        model_json_path = os.path.join(frontend_upload_dir, f"{base_name}_model.json")
+        with open(model_json_path, "w", encoding="utf-8") as f:
+            json.dump(model_json_data, f, indent=2)
+        logger.info(f"💾 Guardado: {model_json_path}")
+        
+        # Guardar weights.bin
+        weights_path = os.path.join(frontend_upload_dir, f"{base_name}_weights.bin")
+        with open(weights_path, "wb") as f:
+            f.write(weights_content)
+        logger.info(f"💾 Guardado: {weights_path}")
+        
+        # ✅ GUARDAR INFO DEL MODELO
+        model_info = {
+            "category": category,
+            "model_name": model_name,
+            "upload_date": upload_timestamp,
+            "labels": labels_list,
+            "tensorflow_js": True,
+            "files": {
+                "model_json_path": model_json_path,
+                "weights_bin_path": weights_path,
+                "model_json_size": len(model_json_content),
+                "weights_bin_size": len(weights_content)
+            },
+            "download_info": {
+                "model_url": f"/train/download/model/{category}/{model_name}/model.json",
+                "weights_url": f"/train/download/model/{category}/{model_name}/weights.bin",
+                "available_for_download": True
+            }
+        }
+        
+        info_path = os.path.join(MODELS_DIR, f"{base_name}_info.json")
+        with open(info_path, "w", encoding="utf-8") as f:
+            json.dump(model_info, f, indent=2, ensure_ascii=False)
+        logger.info(f"💾 Info guardada: {info_path}")
+        
+        logger.info(f"✅ Modelo {category}/{model_name} subido correctamente")
+        
+        return JSONResponse({
+            "success": True,
+            "message": f"Modelo TensorFlow.js '{category}/{model_name}' subido exitosamente",
+            "model_info": model_info,
+            "files_created": [model_json_path, weights_path, info_path]
+        })
+        
+    except ValueError as e:
+        logger.error(f"❌ Error de validación: {e}")
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"Validación fallida: {str(e)}"}
+        )
+    except Exception as e:
+        logger.error(f"❌ Error subiendo modelo: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Error interno: {str(e)}"}
+        )
